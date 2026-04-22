@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections":       { "type": "Object",       "defaultValue": {} },
+    "topicName":          { "type": "String",       "defaultValue": "expense-outcomes" },
+    "subscriptionName":   { "type": "String" },
+    "notificationUrl":    { "type": "SecureString" }
+  },
+  "triggers": {
+    "When_outcome_published": {
+      "type": "ApiConnection",
+      "recurrence": { "frequency": "Second", "interval": 30 },
+      "inputs": {
+        "host":    { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+        "method":  "get",
+        "path":    "/@{encodeURIComponent(parameters('topicName'))}/subscriptions/@{encodeURIComponent(parameters('subscriptionName'))}/messages/head",
+        "queries": { "subscriptionType": "Main" }
+      }
+    }
+  },
+  "actions": {
+    "Parse_outcome": {
+      "type": "ParseJson",
+      "runAfter": {},
+      "inputs": {
+        "content": "@base64ToString(triggerBody()?['ContentData'])",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "outcome":  { "type": "string" },
+            "reason":   { "type": "string" },
+            "approver": { "type": "string" },
+            "errors":   { "type": "array"  },
+            "expense":  { "type": "object" }
+          }
+        }
+      }
+    },
+
+    "Call_send_notification_function": {
+      "type": "Http",
+      "runAfter": { "Parse_outcome": ["Succeeded"] },
+      "inputs": {
+        "method":  "POST",
+        "uri":     "@parameters('notificationUrl')",
+        "headers": { "Content-Type": "application/json" },
+        "body": {
+          "outcome":  "@body('Parse_outcome')?['outcome']",
+          "approver": "@body('Parse_outcome')?['approver']",
+          "errors":   "@body('Parse_outcome')?['errors']",
+          "expense":  "@body('Parse_outcome')?['expense']"
+        },
+        "retryPolicy": {
+          "type": "exponential", "count": 3,
+          "interval": "PT10S", "minimumInterval": "PT5S", "maximumInterval": "PT1M"
+        }
+      }
+    },
+
+  },
+  "outputs": {}
+}

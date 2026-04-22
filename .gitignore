@@ -1,0 +1,53 @@
+# --- Secrets / local config ---
+local.settings.json
+.env
+.env.*
+*.pem
+*.pfx
+*.key
+*.publishsettings
+connectionstrings.json
+connection.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- Azure Functions / Durable ---
+bin/
+obj/
+.python_packages/
+.funcignore.local
+.azure/
+
+# --- IDE / OS ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Screenshots scratch ---
+version-b-logic-apps/screenshots/_raw/
+
+# --- Presentation artifacts ---
+presentation/*.pptx.bak
+~$*.pptx
+
+# --- Debug / scratch test artifacts ---
+msg.json
+trace.json
+t*.json
+

@@ -1,0 +1,158 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "$connections":        { "type": "Object",       "defaultValue": {} },
+    "validateFunctionUrl": { "type": "SecureString"                       },
+    "requestApprovalUrl":  { "type": "SecureString"                       },
+    "approvalTimeout":     { "type": "String",       "defaultValue": "PT10M" },
+    "outcomesTopic":       { "type": "String",       "defaultValue": "expense-outcomes" }
+  },
+  "triggers": {
+    "When_expense_request_arrives": {
+      "type": "ApiConnection",
+      "recurrence": { "frequency": "Second", "interval": 30 },
+      "inputs": {
+        "host":    { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+        "method":  "get",
+        "path":    "/@{encodeURIComponent('expense-requests')}/messages/head",
+        "queries": { "queueType": "Main" }
+      }
+    }
+  },
+  "actions": {
+    "Parse_expense": {
+      "type": "ParseJson",
+      "runAfter": {},
+      "inputs": {
+        "content": "@base64ToString(triggerBody()?['ContentData'])",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "employee_name":  { "type": "string" },
+            "employee_email": { "type": "string" },
+            "amount":         { "type": "number" },
+            "category":       { "type": "string" },
+            "description":    { "type": "string" },
+            "manager_email":  { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "Validate_via_Function": {
+      "type": "Http",
+      "runAfter": { "Parse_expense": ["Succeeded"] },
+      "inputs": {
+        "method":  "POST",
+        "uri":     "@parameters('validateFunctionUrl')",
+        "headers": { "Content-Type": "application/json" },
+        "body":    "@body('Parse_expense')",
+        "retryPolicy": {
+          "type": "exponential", "count": 3,
+          "interval": "PT10S", "minimumInterval": "PT5S", "maximumInterval": "PT1M"
+        }
+      }
+    },
+
+    "If_valid": {
+      "type": "If",
+      "runAfter": { "Validate_via_Function": ["Succeeded"] },
+      "expression": { "equals": ["@body('Validate_via_Function')?['valid']", true] },
+
+      "actions": {
+        "If_auto_approve": {
+          "type": "If",
+          "expression": { "equals": ["@body('Validate_via_Function')?['auto_approve']", true] },
+
+          "actions": {
+            "Publish_auto_approved": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host":   { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+                "method": "post",
+                "path":   "/@{encodeURIComponent(parameters('outcomesTopic'))}/messages",
+                "body": {
+                  "ContentData": "@{base64(string(json(concat('{\"outcome\":\"approved\",\"reason\":\"auto_approved\",\"approver\":\"system\",\"expense\":', string(body('Validate_via_Function')?['normalized']), '}'))))}",
+                  "ContentType": "application/json",
+                  "Properties":  { "outcome": "approved" }
+                }
+              }
+            }
+          },
+
+          "else": {
+            "actions": {
+              "Wait_for_manager_decision": {
+                "type": "HttpWebhook",
+                "inputs": {
+                  "subscribe": {
+                    "method":  "POST",
+                    "uri":     "@parameters('requestApprovalUrl')",
+                    "headers": { "Content-Type": "application/json" },
+                    "body": {
+                      "callback_url": "@{listCallbackUrl()}",
+                      "expense":      "@body('Validate_via_Function')?['normalized']"
+                    }
+                  },
+                  "unsubscribe": {}
+                },
+                "limit": { "timeout": "@parameters('approvalTimeout')" }
+              },
+
+              "Publish_manager_decision": {
+                "type": "ApiConnection",
+                "runAfter": { "Wait_for_manager_decision": ["Succeeded"] },
+                "inputs": {
+                  "host":   { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+                  "method": "post",
+                  "path":   "/@{encodeURIComponent(parameters('outcomesTopic'))}/messages",
+                  "body": {
+                    "ContentData": "@{base64(string(json(concat('{\"outcome\":\"', if(equals(body('Wait_for_manager_decision')?['decision'],'approve'),'approved','rejected'), '\",\"approver\":\"', coalesce(body('Wait_for_manager_decision')?['approver'],'unknown'), '\",\"expense\":', string(body('Validate_via_Function')?['normalized']), '}'))))}",
+                    "ContentType": "application/json",
+                    "Properties":  { "outcome": "@{if(equals(body('Wait_for_manager_decision')?['decision'],'approve'),'approved','rejected')}" }
+                  }
+                }
+              },
+
+              "Publish_escalated": {
+                "type": "ApiConnection",
+                "runAfter": { "Wait_for_manager_decision": ["TimedOut", "Failed"] },
+                "inputs": {
+                  "host":   { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+                  "method": "post",
+                  "path":   "/@{encodeURIComponent(parameters('outcomesTopic'))}/messages",
+                  "body": {
+                    "ContentData": "@{base64(string(json(concat('{\"outcome\":\"escalated\",\"approver\":\"system_timeout\",\"expense\":', string(body('Validate_via_Function')?['normalized']), '}'))))}",
+                    "ContentType": "application/json",
+                    "Properties":  { "outcome": "escalated" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+
+      "else": {
+        "actions": {
+          "Publish_validation_error": {
+            "type": "ApiConnection",
+            "inputs": {
+              "host":   { "connection": { "name": "@parameters('$connections')['servicebus']['connectionId']" } },
+              "method": "post",
+              "path":   "/@{encodeURIComponent(parameters('outcomesTopic'))}/messages",
+              "body": {
+                "ContentData": "@{base64(string(json(concat('{\"outcome\":\"rejected\",\"reason\":\"validation_error\",\"errors\":', string(body('Validate_via_Function')?['errors']), ',\"expense\":', string(body('Parse_expense')), '}'))))}",
+                "ContentType": "application/json",
+                "Properties":  { "outcome": "rejected" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+  },
+  "outputs": {}
+}

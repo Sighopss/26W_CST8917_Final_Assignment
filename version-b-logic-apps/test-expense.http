@@ -1,0 +1,122 @@
+### Expense Approval Pipeline - Version B (Logic Apps + Service Bus) test scenarios
+###
+### The Logic App is triggered by a message arriving in the `expense-requests`
+### Service Bus queue. These requests send messages via the Service Bus REST API.
+### Replace the @sb_* variables with your namespace values.
+###
+### Alternative: use Service Bus Explorer in the Azure portal to send the same JSON
+### bodies to the queue and capture screenshots of the Logic App runs.
+
+@sb_namespace = YOUR_SB_NAMESPACE
+@queue = expense-requests
+@sas_token = SharedAccessSignature sr=...&sig=...&se=...&skn=RootManageSharedAccessKey
+@validate_fn = https://YOUR_FUNCTIONAPP.azurewebsites.net/api/validate-expense?code=YOUR_FUNCTION_KEY
+
+### ----------------------------------------------------------------------
+### Smoke test: call validation Function directly (outside Logic App)
+### ----------------------------------------------------------------------
+POST {{validate_fn}}
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@example.com",
+  "amount": 42.50,
+  "category": "supplies",
+  "description": "USB-C hub",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 1. Valid expense under $100 -> auto-approved
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@example.com",
+  "amount": 42.50,
+  "category": "supplies",
+  "description": "USB-C hub for new laptop",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 2. Valid expense >= $100, manager approves (click link in email)
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@example.com",
+  "amount": 450.00,
+  "category": "travel",
+  "description": "Taxi + conference registration",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 3. Valid expense >= $100, manager rejects
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Charlie Davis",
+  "employee_email": "charlie@example.com",
+  "amount": 2500.00,
+  "category": "equipment",
+  "description": "Second 4K monitor",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 4. Valid expense >= $100, no manager response -> escalated (timeout)
+###    Do not click either link. Wait for the HTTP webhook action timeout.
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Dana Kim",
+  "employee_email": "dana@example.com",
+  "amount": 199.99,
+  "category": "software",
+  "description": "Annual JetBrains license",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 5. Missing required fields -> validation error
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Eve Lee",
+  "amount": 75.00,
+  "category": "meals"
+}
+
+### ----------------------------------------------------------------------
+### 6. Invalid category -> validation error
+### ----------------------------------------------------------------------
+POST https://{{sb_namespace}}.servicebus.windows.net/{{queue}}/messages
+Authorization: {{sas_token}}
+Content-Type: application/json
+
+{
+  "employee_name": "Frank Wu",
+  "employee_email": "frank@example.com",
+  "amount": 30.00,
+  "category": "gambling",
+  "description": "Team building",
+  "manager_email": "bob.manager@example.com"
+}

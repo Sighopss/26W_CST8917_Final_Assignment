@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+    "AUTO_APPROVE_THRESHOLD": "100",
+    "APPROVAL_TIMEOUT_SECONDS": "60"
+  }
+}

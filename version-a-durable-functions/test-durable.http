@@ -1,0 +1,120 @@
+### Expense Approval Pipeline - Version A (Durable Functions) test scenarios
+### Run with the REST Client VS Code extension. Base URL assumes `func start` locally.
+### For the scenarios that need a manager decision, copy the `instance_id` from the 202 response.
+
+@base = http://localhost:7071/api
+@instance_id = PASTE_INSTANCE_ID_HERE
+
+### ----------------------------------------------------------------------
+### 1. Valid expense under $100 -> auto-approved
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@example.com",
+  "amount": 42.50,
+  "category": "supplies",
+  "description": "USB-C hub for new laptop",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 2. Valid expense >= $100, manager will approve
+###    Step 2a: submit; Step 2b: approve using returned instance_id
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@example.com",
+  "amount": 450.00,
+  "category": "travel",
+  "description": "Taxi + conference registration",
+  "manager_email": "bob.manager@example.com"
+}
+
+### 2b. Manager approves (replace @instance_id at top of file)
+POST {{base}}/expenses/{{instance_id}}/decision
+Content-Type: application/json
+
+{
+  "decision": "approve",
+  "approver": "bob.manager@example.com",
+  "comment": "Approved - within team budget"
+}
+
+### ----------------------------------------------------------------------
+### 3. Valid expense >= $100, manager will reject
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Charlie Davis",
+  "employee_email": "charlie@example.com",
+  "amount": 2500.00,
+  "category": "equipment",
+  "description": "Second 4K monitor",
+  "manager_email": "bob.manager@example.com"
+}
+
+### 3b. Manager rejects
+POST {{base}}/expenses/{{instance_id}}/decision
+Content-Type: application/json
+
+{
+  "decision": "reject",
+  "approver": "bob.manager@example.com",
+  "comment": "Not in this quarter's budget"
+}
+
+### ----------------------------------------------------------------------
+### 4. Valid expense >= $100, no manager response -> escalated
+###    Do NOT send a decision. Wait APPROVAL_TIMEOUT_SECONDS (default 60s).
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Dana Kim",
+  "employee_email": "dana@example.com",
+  "amount": 199.99,
+  "category": "software",
+  "description": "Annual JetBrains license",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### 5. Missing required fields -> validation error
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Eve Lee",
+  "amount": 75.00,
+  "category": "meals"
+}
+
+### ----------------------------------------------------------------------
+### 6. Invalid category -> validation error
+### ----------------------------------------------------------------------
+POST {{base}}/expenses
+Content-Type: application/json
+
+{
+  "employee_name": "Frank Wu",
+  "employee_email": "frank@example.com",
+  "amount": 30.00,
+  "category": "gambling",
+  "description": "Team building",
+  "manager_email": "bob.manager@example.com"
+}
+
+### ----------------------------------------------------------------------
+### Utility: query orchestration status
+### ----------------------------------------------------------------------
+GET http://localhost:7071/runtime/webhooks/durabletask/instances/{{instance_id}}?taskHub=ExpenseApprovalHub&connection=Storage
