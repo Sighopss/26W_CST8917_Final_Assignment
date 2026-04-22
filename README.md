@@ -98,7 +98,7 @@ Logic Apps has no first-class "pause until a human clicks a link" action. The cl
 
 ## Comparison Analysis
 
-> 800-1200 word structured comparison across the six required dimensions.
+
 
 ### 1. Development Experience
 
